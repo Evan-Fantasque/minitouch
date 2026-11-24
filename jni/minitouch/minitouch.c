@@ -74,6 +74,7 @@ typedef struct
   int tracking_id;
   contact_t contacts[MAX_SUPPORTED_CONTACTS];
   int active_contacts;
+  unsigned int pending_contacts;
 } internal_state_t;
 
 static int is_character_device(const char* devpath)
@@ -406,7 +407,7 @@ static int type_a_touch_down(internal_state_t* state, int contact, int x, int y,
 
   if (state->contacts[contact].enabled)
   {
-    type_a_touch_panic_reset_all(state);
+    return 0;
   }
 
   state->contacts[contact].enabled = 1;
@@ -477,7 +478,7 @@ static int type_b_touch_down(internal_state_t* state, int contact, int x, int y,
 
   if (state->contacts[contact].enabled)
   {
-    type_b_touch_panic_reset_all(state);
+    return 0;
   }
 
   state->contacts[contact].enabled = 1;
@@ -602,6 +603,7 @@ static int touch_panic_reset_all(internal_state_t* state)
 
 static int commit(internal_state_t* state)
 {
+  state->pending_contacts = 0;
   if (state->has_mtslot)
   {
     return type_b_commit(state);
@@ -642,11 +644,7 @@ static int start_server(char* sockname)
 
 static void parse_input(char* buffer, internal_state_t* state)
 {
-  char* cursor;
-  long int contact, x, y, pressure, wait;
-
-  cursor = (char*) buffer;
-  cursor += 1;
+  char* cursor = buffer + 1;
 
   switch (buffer[0])
   {
@@ -655,31 +653,49 @@ static void parse_input(char* buffer, internal_state_t* state)
       break;
     case 'r': // RESET
       touch_panic_reset_all(state);
+      state->pending_contacts = 0;
       break;
     case 'd': // TOUCH DOWN
-      contact = strtol(cursor, &cursor, 10);
-      x = strtol(cursor, &cursor, 10);
-      y = strtol(cursor, &cursor, 10);
-      pressure = strtol(cursor, &cursor, 10);
-      touch_down(state, contact, x, y, pressure);
-      break;
     case 'm': // TOUCH MOVE
-      contact = strtol(cursor, &cursor, 10);
-      x = strtol(cursor, &cursor, 10);
-      y = strtol(cursor, &cursor, 10);
-      pressure = strtol(cursor, &cursor, 10);
-      touch_move(state, contact, x, y, pressure);
-      break;
     case 'u': // TOUCH UP
-      contact = strtol(cursor, &cursor, 10);
-      touch_up(state, contact);
+    {
+      char* end;
+      long contact = strtol(cursor, &end, 10);
+      if (end == cursor || contact < 0 || contact >= state->max_contacts)
+        break;
+      cursor = end;
+
+      unsigned int slot = 1u << contact;
+      // Flush a repeated slot before applying its next operation. Distinct slots
+      // still share the caller's commit, including simultaneous finger presses.
+      if (state->pending_contacts & slot)
+        commit(state);
+
+      int accepted;
+      if (buffer[0] == 'u')
+      {
+        accepted = touch_up(state, contact);
+      }
+      else
+      {
+        long x = strtol(cursor, &cursor, 10);
+        long y = strtol(cursor, &cursor, 10);
+        long pressure = strtol(cursor, &cursor, 10);
+        accepted = buffer[0] == 'd' ? touch_down(state, contact, x, y, pressure)
+                                    : touch_move(state, contact, x, y, pressure);
+      }
+      if (accepted)
+        state->pending_contacts |= slot;
       break;
+    }
     case 'w':
-      wait = strtol(cursor, &cursor, 10);
+    {
+      long wait = strtol(cursor, &cursor, 10);
       if (g_verbose)
         fprintf(stderr, "Waiting %ld ms\n", wait);
       usleep(wait * 1000);
       break;
+    }
     default:
       break;
   }

@@ -156,6 +156,8 @@ The order of touches in a single commit is not important either. For example you
 
 Note however that you cannot have more than one `d`, `m` or `u` *for the same `<contact>`* in one commit.
 
+If a client repeats a contact before committing, this fork flushes the pending frame first. A second down on a still-active contact is ignored so other fingers are left pressed.
+
 #### `r`
 
 Example input: `r`

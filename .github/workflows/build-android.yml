@@ -1,0 +1,27 @@
+name: Build Android minitouch
+
+on:
+  push:
+    branches:
+      - codex/contact-frames
+    paths:
+      - "jni/**"
+      - ".github/workflows/build-android.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Build for MuMu x86-64
+        run: '"$ANDROID_NDK_LATEST_HOME/ndk-build" APP_ABI=x86_64'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: minitouch-mumu-x86_64
+          path: libs/x86_64/minitouch
+          if-no-files-found: error
